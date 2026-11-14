@@ -130,14 +130,14 @@ def test_sandbox_pod_is_hardened():
 
 
 def test_admission_policies_fit_the_configured_sandbox_image():
-    # minikube/practice-executor-15-admission.yaml: the enforcing policy stays enforcing, and the image rule of the
+    # kubernetes/practice-executor-15-admission.yaml: the enforcing policy stays enforcing, and the image rule of the
     # warn-only one accepts every runtime image the executor is configured with. Without this, renaming the image
     # in the ConfigMap would make that rule reject every sandbox pod on the day it is switched to Deny.
     import re
 
     import yaml
 
-    manifests = RUNNER.parents[3] / "minikube"
+    manifests = RUNNER.parents[3] / "kubernetes"
     docs = [d for d in yaml.safe_load_all((manifests / "practice-executor-15-admission.yaml").read_text()) if d]
     actions = {d["spec"]["policyName"]: d["spec"]["validationActions"] for d in docs if d["kind"] == "ValidatingAdmissionPolicyBinding"}
     assert actions["practice-sandbox-pods"] == ["Deny"] and actions["practice-dispatcher-deletes"] == ["Deny"]
