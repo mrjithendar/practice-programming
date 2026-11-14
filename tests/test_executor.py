@@ -129,6 +129,26 @@ def test_sandbox_pod_is_hardened():
     assert all("hostPath" not in v for v in spec["volumes"])
 
 
+def test_admission_policies_fit_the_configured_sandbox_image():
+    # minikube/practice-executor-15-admission.yaml: the enforcing policy stays enforcing, and the image rule of the
+    # warn-only one accepts every runtime image the executor is configured with. Without this, renaming the image
+    # in the ConfigMap would make that rule reject every sandbox pod on the day it is switched to Deny.
+    import re
+
+    import yaml
+
+    manifests = RUNNER.parents[3] / "minikube"
+    docs = [d for d in yaml.safe_load_all((manifests / "practice-executor-15-admission.yaml").read_text()) if d]
+    actions = {d["spec"]["policyName"]: d["spec"]["validationActions"] for d in docs if d["kind"] == "ValidatingAdmissionPolicyBinding"}
+    assert actions["practice-sandbox-pods"] == ["Deny"] and actions["practice-dispatcher-deletes"] == ["Deny"]
+    extra = next(d for d in docs if d["kind"] == "ValidatingAdmissionPolicy" and d["metadata"]["name"] == "practice-sandbox-pods-extra")
+    prefixes = re.findall(r"c\.image\.startsWith\('([^']+)'\)", " ".join(v["expression"] for v in extra["spec"]["validations"]))
+    assert len(prefixes) == 1
+    config = next(d for d in yaml.safe_load_all((manifests / "practice-executor-40-executor.yaml").read_text()) if d and d["kind"] == "ConfigMap" and "EXECUTOR_RUNTIMES" in d.get("data", {}))
+    images = json.loads(config["data"]["EXECUTOR_RUNTIMES"]).values()
+    assert images and all(image.startswith(prefixes[0]) for image in images)
+
+
 def test_kubernetes_backend_runs_a_pod_and_deletes_it():
     calls: list[tuple[str, str]] = []
     created: dict = {}
