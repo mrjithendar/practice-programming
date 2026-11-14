@@ -3,8 +3,11 @@
 FROM python:3.13-slim
 
 WORKDIR /srv
+# The versions live in pyproject.toml only (the tests install from it too), so the image runs what was tested.
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir "fastapi==0.162.0" "uvicorn==0.54.0" "redis==8.1.0" "httpx==0.28.1" "pydantic==2.14.2"
+RUN python -c "import tomllib; print(*tomllib.load(open('pyproject.toml', 'rb'))['project']['dependencies'], sep=chr(10))" > requirements.txt \
+    && pip install --no-cache-dir -r requirements.txt \
+    && rm requirements.txt
 COPY app ./app
 COPY sandbox/runner.py ./sandbox/runner.py
 

@@ -7,6 +7,7 @@ Keys (prefix px:):
   queue               list of queued job ids (LPUSH in, BLMOVE out to `processing`)
   processing          list of job ids a dispatcher has taken
   leases              zset job id → lease expiry; an expired lease means the dispatcher died, so the job is requeued
+  unleased            zset job id → when the reaper first saw it in `processing` without a lease (see reap)
   active:{user}       zset job id → start time (per-user concurrency)
   rl:{user}:{minute}  counter (per-user rate limit)
   abuse:{user}        zset of timestamps of runs that hit a resource limit
@@ -40,6 +41,10 @@ class Rejected(Exception):
 
 def _f(v: Any) -> float | None:
     return float(v) if v not in (None, "", b"") else None
+
+
+def _s(v: Any) -> str:
+    return v.decode() if isinstance(v, bytes) else v
 
 
 class JobQueue:
@@ -224,16 +229,56 @@ class JobQueue:
             await self.r.hincrby(f"{P}stats", "blocked_users", 1)
 
     async def reap(self, now: float | None = None) -> list[str]:
-        """Requeue (or fail) jobs whose dispatcher stopped renewing the lease."""
+        """Requeue (or fail) jobs whose dispatcher stopped: the lease ran out, or the job was taken and never leased."""
         now = now or time.time()
-        expired = await self.r.zrangebyscore(f"{P}leases", 0, now)
         out = []
-        for raw in expired:
-            job_id = raw.decode() if isinstance(raw, bytes) else raw
-            attempts = int(await self.r.hget(f"{P}job:{job_id}", "attempts") or 0)
-            await self.fail(job_id, "dispatcher stopped responding", attempts)
-            out.append(job_id)
+        for raw in await self.r.zrangebyscore(f"{P}leases", 0, now):
+            job_id = _s(raw)
+            # Every dispatcher reaps. Removing the lease is the claim: only one of them hands the job back, so it
+            # cannot end up in the queue twice.
+            if await self.r.zrem(f"{P}leases", job_id) and await self._recover(job_id, "dispatcher stopped responding"):
+                out.append(job_id)
+        for job_id in await self._stranded(now):
+            if await self._recover(job_id, "dispatcher stopped before the job started"):
+                out.append(job_id)
         return out
+
+    async def _stranded(self, now: float) -> list[str]:
+        """
+        Jobs that sat in `processing` without a lease for a whole lease period, claimed for recovery.
+
+        take() moves the id into `processing` and writes the lease in a second step. A dispatcher that dies in
+        between leaves the job where neither the queue nor the lease reaper looks: "queued" until its record
+        expires, never run, and holding one of the user's concurrency slots. A live dispatcher closes that gap
+        within milliseconds, so an entry is only noted when first seen and handed back if it is still unleased a
+        lease period later. Removing the note is the claim (see reap).
+        """
+        seen = f"{P}unleased"
+        ids = list(dict.fromkeys(_s(i) for i in await self.r.lrange(f"{P}processing", 0, -1)))
+        noted = {_s(k): float(v) for k, v in await self.r.zrange(seen, 0, -1, withscores=True)}
+        for job_id in noted.keys() - set(ids):
+            await self.r.zrem(seen, job_id)
+        out = []
+        for job_id in ids:
+            if await self.r.zscore(f"{P}leases", job_id) is not None:
+                if job_id in noted:
+                    await self.r.zrem(seen, job_id)
+            elif job_id not in noted:
+                await self.r.zadd(seen, {job_id: now}, nx=True)
+            elif now - noted[job_id] >= self.s.lease_seconds and await self.r.zrem(seen, job_id):
+                out.append(job_id)
+        return out
+
+    async def _recover(self, job_id: str, reason: str) -> bool:
+        """Hand a job its dispatcher abandoned back to the queue, or fail it after the last attempt."""
+        raw = await self.r.hgetall(f"{P}job:{job_id}")
+        h = {_s(k): _s(v) for k, v in raw.items()}
+        if h.get("status") not in ("queued", "running") or "request" not in h:
+            # Finished meanwhile, or its record expired: nothing to run, only the entry to drop.
+            await self.r.lrem(f"{P}processing", 0, job_id)
+            return False
+        await self.fail(job_id, reason, int(h.get("attempts", 0)))
+        return True
 
     async def heartbeat(self, dispatcher_id: str) -> None:
         await self.r.hset(f"{P}dispatchers", dispatcher_id, time.time())

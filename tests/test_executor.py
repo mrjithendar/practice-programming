@@ -214,6 +214,83 @@ def test_expired_leases_are_requeued_then_failed(redis):
     asyncio.run(go())
 
 
+def test_a_job_taken_but_never_leased_is_handed_back(redis):
+    s = settings(max_attempts=2, lease_seconds=120)
+    q = JobQueue(redis, s)
+
+    async def go():
+        view, _ = await q.submit(req())
+        # A dispatcher that died right after taking the job: it is in `processing`, and no lease was written.
+        assert await redis.lmove("px:queue", "px:processing", "RIGHT", "LEFT")
+        assert await q.reap(now=1000) == []  # first seen: noted, not touched
+        assert await q.reap(now=1119) == []  # a live dispatcher writes the lease within milliseconds
+        assert (await q.get(view.id)).status == "queued"
+        assert await q.reap(now=1120) == [view.id]
+        assert await redis.lrange("px:queue", 0, -1) == [view.id.encode()]
+        assert await redis.llen("px:processing") == 0 and await redis.zcard("px:unleased") == 0
+        # It never started, so the retry is still its first attempt.
+        taken = await q.take(timeout=0.1)
+        assert taken and taken[0] == view.id and taken[2] == 1
+
+    asyncio.run(go())
+
+
+def test_the_reaper_leaves_a_job_alone_once_it_has_its_lease(redis):
+    q = JobQueue(redis, settings(lease_seconds=120))
+
+    async def go():
+        view, _ = await q.submit(req())
+        await redis.lmove("px:queue", "px:processing", "RIGHT", "LEFT")
+        assert await q.reap(now=1000) == [] and await redis.zcard("px:unleased") == 1
+        # The dispatcher finishes take(): the job is running under a lease.
+        await redis.zadd("px:leases", {view.id: 5000})
+        await redis.hset(f"px:job:{view.id}", mapping={"status": "running", "attempts": 1})
+        assert await q.reap(now=1500) == [] and await redis.zcard("px:unleased") == 0
+        assert await redis.llen("px:processing") == 1 and await redis.llen("px:queue") == 0
+
+    asyncio.run(go())
+
+
+def test_two_reapers_hand_a_job_back_once(redis):
+    s = settings(max_attempts=3, lease_seconds=120)
+    a, b = JobQueue(redis, s), JobQueue(redis, s)
+
+    async def go():
+        view, _ = await a.submit(req())
+        await redis.lmove("px:queue", "px:processing", "RIGHT", "LEFT")
+        await a.reap(now=1000)
+        never_leased = await asyncio.gather(a.reap(now=2000), b.reap(now=2000))
+        assert sorted(never_leased, key=len) == [[], [view.id]]
+        assert await redis.lrange("px:queue", 0, -1) == [view.id.encode()]
+        await a.take(timeout=0.1)
+        lease_expired = await asyncio.gather(a.reap(now=10**10), b.reap(now=10**10))
+        assert sorted(lease_expired, key=len) == [[], [view.id]]
+        assert await redis.lrange("px:queue", 0, -1) == [view.id.encode()]
+
+    asyncio.run(go())
+
+
+def test_a_finished_job_left_in_processing_is_dropped_not_rerun(redis):
+    q = JobQueue(redis, settings(lease_seconds=120))
+
+    async def go():
+        view, _ = await q.submit(req())
+        await q.take(timeout=0.1)
+        await q.complete(view.id, {"status": "completed", "tests": []})
+        await redis.lpush("px:processing", view.id)
+        assert await q.reap(now=1000) == [] and await q.reap(now=2000) == []
+        assert await redis.llen("px:processing") == 0 and await redis.llen("px:queue") == 0
+        assert (await q.get(view.id)).status == "done"
+
+    asyncio.run(go())
+
+
+def test_the_image_installs_the_versions_the_tests_ran_with():
+    # One dependency list (pyproject.toml). The Dockerfile used to repeat it and had drifted to another pydantic.
+    dockerfile = (RUNNER.parent.parent / "Dockerfile").read_text()
+    assert "pyproject.toml" in dockerfile and "==" not in dockerfile
+
+
 def test_repeated_resource_abuse_blocks_the_user(redis):
     q = JobQueue(redis, settings(abuse_threshold=3))
 
