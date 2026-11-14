@@ -10,7 +10,7 @@ runbook: [../www/docs/PYTHON_PRACTICE_EXECUTOR.md](../www/docs/PYTHON_PRACTICE_E
 | `app/dispatcher.py` | Takes jobs, runs each in a fresh sandbox, renews leases, requeues on dispatcher death (a lease that ran out, or a job taken and never leased) |
 | `app/backends.py` | `KubernetesBackend` (pod per job, gVisor, hardened spec) and `LocalBackend` (development only) |
 | `sandbox/runner.py` | Runs inside the sandbox: forks per test, limits, captures output, prints one result line |
-| `tools/build_problems.py` | Builds and validates `services/www/content/python-practice/catalog.generated.json` |
+| `tools/build_problems.py` | Builds and validates `sites/<site>/content/python-practice/catalog.generated.json` |
 
 ## Configuration (environment)
 

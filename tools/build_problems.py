@@ -4,8 +4,8 @@ Build the seed catalog for jithendar.com/python-practice.
     python services/executor/tools/build_problems.py            # validate and write the generated catalog
     python services/executor/tools/build_problems.py --check    # validate only (CI)
 
-Reads   services/www/content/python-practice/{roles,topics}.yaml and problems/*.yaml (sources, written by people)
-Writes  services/www/content/python-practice/catalog.generated.json (read by the web app's seeder)
+Reads   sites/$SITE/content/python-practice/{roles,topics}.yaml and problems/*.yaml (sources, written by people)
+Writes  sites/$SITE/content/python-practice/catalog.generated.json (read by the web app's seeder)
 
 For every problem it runs the canonical solution (and any alternative solutions) through the real sandbox
 runner (sandbox/runner.py, locally: this is trusted, reviewed content) to compute the expected output of every
@@ -20,6 +20,7 @@ import base64
 import hashlib
 import json
 import math
+import os
 import re
 import subprocess
 import sys
@@ -29,7 +30,9 @@ from typing import Any
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]  # services/, which holds www/ and executor/
-CONTENT = ROOT / "www" / "content" / "python-practice"
+# The site whose practice problems to build: sites/<domain>/ at the root of the repository.
+SITE = os.environ.get("SITE") or "jithendar.com"
+CONTENT = ROOT.parent / "sites" / SITE / "content" / "python-practice"
 RUNNER = ROOT / "executor" / "sandbox" / "runner.py"
 OUT = CONTENT / "catalog.generated.json"
 
@@ -216,7 +219,7 @@ def build(check_only: bool) -> int:
         return 1
     if not check_only:
         OUT.write_text(json.dumps({"schema": 1, "roles": roles, "topics": topics, "problems": built}, indent=1, sort_keys=False) + "\n")
-        print(f"wrote {OUT.relative_to(ROOT)}")
+        print(f"wrote {OUT.relative_to(ROOT.parent)}")
     return 0
 
 
