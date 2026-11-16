@@ -1,11 +1,11 @@
 """
-Build the seed catalog for jithendar.com/python-practice.
+Build the seed catalog for a site's /python-practice (jithendar.com's lives in mrjithendar/jithendar.com).
 
     python services/executor/tools/build_problems.py            # validate and write the generated catalog
     python services/executor/tools/build_problems.py --check    # validate only (CI)
 
-Reads   sites/$SITE/content/python-practice/{roles,topics}.yaml and problems/*.yaml (sources, written by people)
-Writes  sites/$SITE/content/python-practice/catalog.generated.json (read by the web app's seeder)
+Reads   <site>/content/python-practice/{roles,topics}.yaml and problems/*.yaml (sources, written by people)
+Writes  <site>/content/python-practice/catalog.generated.json (read by the web app's seeder)
 
 For every problem it runs the canonical solution (and any alternative solutions) through the real sandbox
 runner (sandbox/runner.py, locally: this is trusted, reviewed content) to compute the expected output of every
@@ -30,9 +30,15 @@ from typing import Any
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]  # services/, which holds www/ and executor/
-# The site whose practice problems to build: sites/<domain>/ at the root of the repository.
-SITE = os.environ.get("SITE") or "jithendar.com"
-CONTENT = ROOT.parent / "sites" / SITE / "content" / "python-practice"
+# The site whose practice problems to build, as in services/www/scripts/use-site.mjs: SITE_DIR (a site folder, e.g.
+# a checkout of the site's own repository), else sites/$SITE at the root of this repository, else the test fixture.
+if os.environ.get("SITE_DIR"):
+    SITE_ROOT = Path(os.environ["SITE_DIR"]).resolve()
+elif os.environ.get("SITE"):
+    SITE_ROOT = ROOT.parent / "sites" / os.environ["SITE"]
+else:
+    SITE_ROOT = ROOT / "www" / "tests" / "fixtures" / "site"
+CONTENT = SITE_ROOT / "content" / "python-practice"
 RUNNER = ROOT / "executor" / "sandbox" / "runner.py"
 OUT = CONTENT / "catalog.generated.json"
 
@@ -219,7 +225,7 @@ def build(check_only: bool) -> int:
         return 1
     if not check_only:
         OUT.write_text(json.dumps({"schema": 1, "roles": roles, "topics": topics, "problems": built}, indent=1, sort_keys=False) + "\n")
-        print(f"wrote {OUT.relative_to(ROOT.parent)}")
+        print(f"wrote {OUT}")
     return 0
 
 
