@@ -25,7 +25,7 @@ name: practice
 #
 # Secrets: HARBOR_USERNAME, HARBOR_PASSWORD (Harbor robot, project jithendar), MK4_CI_TOKEN and MK4_CI_APPLY_TOKEN;
 # variables MK4_API_SERVER, MK4_CA_DATA (set them with jithendar.com's scripts/setup-ci-deployer.sh and
-# setup-ci-applier.sh, GITHUB_REPO=mrjithendar/practice-programming).
+# setup-ci-applier.sh, GITHUB_REPO=moks-tech/practice-programming).
 
 on:
   workflow_dispatch:

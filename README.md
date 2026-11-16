@@ -3,7 +3,7 @@
 Programming practice for moks-cms sites (today [jithendar.com/python-practice](https://jithendar.com/python-practice)):
 the sandboxed code executor, one sandbox image per language, the problem bank, and the executor's Kubernetes
 manifests. The practice pages, the admin and the seeding are part of the CMS
-([moks-cms](https://github.com/mrjithendar/moks-cms), `services/www/src/lib/practice`). Moved here on 2026-11-16: the executor from
+([moks-cms](https://github.com/moks-tech/moks-cms), `services/www/src/lib/practice`). Moved here on 2026-11-16: the executor from
 moks-cms `services/executor`, the problems from jithendar.com `content/python-practice`, history kept.
 
 | Path | Contents |
@@ -48,7 +48,7 @@ assume Python.
 
 Secrets `HARBOR_USERNAME`, `HARBOR_PASSWORD`, `MK4_CI_TOKEN`, `MK4_CI_APPLY_TOKEN`; variables `MK4_API_SERVER`,
 `MK4_CA_DATA`, `PRACTICE_EXECUTOR_DEPLOY`. jithendar.com's `scripts/setup-ci-deployer.sh` and `setup-ci-applier.sh`
-set the cluster ones (`GITHUB_REPO=mrjithendar/practice-programming`). First-time cluster steps: `setup-practice-runner.sh`.
+set the cluster ones (`GITHUB_REPO=moks-tech/practice-programming`). First-time cluster steps: `setup-practice-runner.sh`.
 
 ## License
 
