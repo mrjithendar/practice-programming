@@ -1,0 +1,14 @@
+# syntax=docker/dockerfile:1
+# practice-catalog: the generated problem catalogs, one folder per language (python/catalog.generated.json; more
+# languages later). No Node, no build: busybox only provides `cp`. Pushed by .github/workflows/ci.yml as
+# registry.jithendar.com/jithendar/practice-catalog:latest.
+#
+# A site that serves the practice pages runs it as an init container that copies /catalog into an emptyDir mounted
+# in the web container (jithendar.com: /app/practice, with PRACTICE_CATALOG_PATH=/app/practice/python/catalog.generated.json);
+# moks-cms loads new and changed problems from it when it starts (src/lib/practice/seed.ts).
+#
+#   docker build --platform linux/arm64 -f Dockerfile.catalog -t practice-catalog .     (from the repository root)
+FROM busybox:1.38.0
+COPY --chown=1000:1000 problems/python/catalog.generated.json /catalog/python/catalog.generated.json
+USER 1000:1000
+CMD ["sh", "-c", "cp -R /catalog/. /mnt/practice/"]

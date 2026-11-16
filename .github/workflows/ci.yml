@@ -1,0 +1,204 @@
+name: practice
+
+# Programming practice: the sandboxed code executor (executor/), its per-language sandbox images (Python today:
+# executor/sandbox), the problem bank (problems/<language>/) and the executor's manifests (kubernetes/). Sites run the
+# practice pages (moks-cms) and load the problem catalog from the practice-catalog image.
+#
+# check   → every pull request and push: executor tests, the catalog is valid and up to date (every reference
+#           solution runs through the real sandbox runner), the manifests render, the scripts' own tests, shellcheck.
+# images  → a push to master (a merged pull request) or a manual run: build the arm64 images, smoke-test the sandbox
+#           (one job through the real runner, offline), push
+#             registry.jithendar.com/jithendar/practice-executor:<commit> and :latest
+#             registry.jithendar.com/jithendar/practice-sandbox:<commit> and :latest (sandbox pods pull :latest)
+#             registry.jithendar.com/jithendar/practice-catalog:latest (Dockerfile.catalog)
+# deploy  → after images, only when repository variable PRACTICE_EXECUTOR_DEPLOY is "true":
+#           1. apply the application objects of kubernetes/ (Deployments, Services, ConfigMaps, NetworkPolicies) as
+#              ServiceAccount jithendar/github-ci-applier, keeping the image each workload runs (keep-live-images.py).
+#              RuntimeClass, admission policies, RBAC, quotas and Secrets stay with a person (setup-practice-runner.sh).
+#           2. point both executor Deployments at practice-executor:<commit> and wait (scripts/ci-rollout.py), as
+#              ServiceAccount jithendar/github-ci-deployer.
+#           3. when the catalog changed: restart every Deployment that loads practice-catalog (jithendar-com), so
+#              moks-cms seeds the new and changed problems at start.
+#
+# Roll back: `scripts/ci-rollout.py registry.jithendar.com/jithendar/practice-executor <earlier commit>`, or switch
+# execution off in a site's Admin → Python practice → Settings (instant).
+#
+# Secrets: HARBOR_USERNAME, HARBOR_PASSWORD (Harbor robot, project jithendar), MK4_CI_TOKEN and MK4_CI_APPLY_TOKEN;
+# variables MK4_API_SERVER, MK4_CA_DATA (set them with jithendar.com's scripts/setup-ci-deployer.sh and
+# setup-ci-applier.sh, GITHUB_REPO=mrjithendar/practice-programming).
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: practice-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - name: Install test dependencies
+        working-directory: executor
+        run: pip install --quiet ".[test]" pyyaml==6.0.3
+      - name: Executor tests
+        working-directory: executor
+        run: python -m pytest -q
+      - name: Catalog is valid and up to date
+        run: |
+          python executor/tools/build_problems.py
+          git diff --exit-code -- problems/python/catalog.generated.json || {
+            echo "::error::catalog.generated.json is stale: run python executor/tools/build_problems.py and commit it"; exit 1; }
+      - name: Manifests render, and the scripts' own tests
+        run: |
+          set -euo pipefail
+          scripts/manifests.sh | python scripts/ci-app-manifests.py > /dev/null
+          python -m unittest discover -s scripts/tests -p 'test_*.py'
+          bash scripts/tests/kube-context.test.sh
+          scripts/check-conflict-copies.sh
+      - name: shellcheck
+        run: shellcheck -x scripts/manifests.sh scripts/check-conflict-copies.sh scripts/create-practice-executor-secrets.sh scripts/lib/kube-context.sh scripts/lib/ci-kubeconfig.sh scripts/tests/kube-context.test.sh
+
+  images:
+    needs: check
+    if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    concurrency:
+      group: practice-images
+      cancel-in-progress: false
+    env:
+      REGISTRY: registry.jithendar.com/jithendar
+    outputs:
+      tag: ${{ steps.push.outputs.tag }}
+      catalog: ${{ steps.catalog.outputs.changed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Log in to Harbor
+        env:
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [[ -n "$HARBOR_USERNAME" && -n "$HARBOR_PASSWORD" ]] || { echo "::error::Secrets HARBOR_USERNAME and HARBOR_PASSWORD must be set"; exit 1; }
+          printf '%s' "$HARBOR_PASSWORD" | docker login registry.jithendar.com --username "$HARBOR_USERNAME" --password-stdin
+      - name: Build and push the executor and the sandbox
+        id: push
+        working-directory: executor
+        # Two tags for one image: <commit> is this release's own tag and what the Deployments will run; latest names
+        # the newest release (sandbox pods use it).
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_SHA:0:12}"
+          docker build --platform linux/arm64 --provenance=false -t "$REGISTRY/practice-executor:$tag" -t "$REGISTRY/practice-executor:latest" .
+          docker build --platform linux/arm64 --provenance=false --build-arg PYTHON_VERSION=3.13 -t "$REGISTRY/practice-sandbox:$tag" -t "$REGISTRY/practice-sandbox:latest" sandbox
+          # Smoke test the sandbox image: run one job through the real runner, offline.
+          payload=$(python3 -c 'import base64,json; print(base64.b64encode(json.dumps({"nonce":"n","code":"def f(a):\n    return a*2\n","entrypoint":"f","tests":[{"id":"t0","args":[21]}],"limits":{"per_test_seconds":2,"total_seconds":5,"memory_mb":128,"output_bytes":1024}}).encode()).decode())')
+          docker run --rm --network none --read-only --tmpfs /tmp -e JOB_PAYLOAD="$payload" "$REGISTRY/practice-sandbox:$tag" | grep -q '"output": 42'
+          for image in practice-sandbox practice-executor; do
+            docker push --quiet "$REGISTRY/$image:$tag"
+            docker push --quiet "$REGISTRY/$image:latest"
+            echo "- $REGISTRY/$image:$tag and :latest ($(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/$image:latest"))" >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Did the catalog change?
+        id: catalog
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          changed=true
+          if [[ "$EVENT" == push && -n "$BEFORE" && ! "$BEFORE" =~ ^0+$ ]] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            git diff --quiet "$BEFORE" "$GITHUB_SHA" -- 'problems/*/catalog.generated.json' Dockerfile.catalog && changed=false
+          fi
+          echo "changed=$changed" | tee -a "$GITHUB_OUTPUT"
+      - name: Build and push the catalog
+        run: |
+          set -euo pipefail
+          docker build --platform linux/arm64 --provenance=false -f Dockerfile.catalog \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$REGISTRY/practice-catalog:latest" .
+          out="$(mktemp -d)"; chmod 777 "$out"
+          docker run --rm -v "$out:/mnt/practice" "$REGISTRY/practice-catalog:latest"
+          python3 -c 'import json, sys; c = json.load(open(sys.argv[1])); assert c["problems"], "no problems"; print(len(c["problems"]), "problems")' "$out/python/catalog.generated.json"
+          docker push --quiet "$REGISTRY/practice-catalog:latest"
+          echo "- $REGISTRY/practice-catalog:latest (commit $GITHUB_SHA)" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: images
+    if: vars.PRACTICE_EXECUTOR_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: practice-deploy
+      cancel-in-progress: false
+    env:
+      REGISTRY: registry.jithendar.com/jithendar
+      TAG: ${{ needs.images.outputs.tag }}
+      CATALOG: ${{ needs.images.outputs.catalog }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-kubectl@bda439f5f36b99b262ebdcd3613869bddb064c8e # v5.2.0
+        with:
+          version: v1.35.0
+      - run: python -m pip install --quiet pyyaml==6.0.3
+      - name: Apply the application objects
+        env:
+          MK4_API_SERVER: ${{ vars.MK4_API_SERVER }}
+          MK4_CA_DATA: ${{ vars.MK4_CA_DATA }}
+          MK4_CI_APPLY_TOKEN: ${{ secrets.MK4_CI_APPLY_TOKEN }}
+        run: |
+          set -euo pipefail
+          for v in MK4_API_SERVER MK4_CA_DATA MK4_CI_APPLY_TOKEN; do
+            [[ -n "${!v}" ]] || { echo "::error::$v is not set; run jithendar.com's scripts/setup-ci-applier.sh with GITHUB_REPO=$GITHUB_REPOSITORY"; exit 1; }
+          done
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig-apply"
+          trap 'rm -f "$KUBECONFIG"' EXIT
+          (umask 077; perl -pe 's/\$\{(MK4_[A-Z_]+)\}/$ENV{$1}/g' .github/jithendar-ci-applier.yaml > "$KUBECONFIG")
+          scripts/manifests.sh | python scripts/ci-app-manifests.py > "$RUNNER_TEMP/apply.yaml"
+          kubectl get deployments,statefulsets -o json > "$RUNNER_TEMP/live.json"
+          python scripts/keep-live-images.py "$RUNNER_TEMP/live.json" < "$RUNNER_TEMP/apply.yaml" > "$RUNNER_TEMP/apply.live.yaml"
+          kubectl apply --dry-run=server -f "$RUNNER_TEMP/apply.live.yaml" > /dev/null
+          rc=0; kubectl diff -f "$RUNNER_TEMP/apply.live.yaml" || rc=$?
+          [[ $rc -le 1 ]] || { echo "::error::kubectl diff failed"; exit 1; }
+          kubectl apply -f "$RUNNER_TEMP/apply.live.yaml"
+      - name: Roll out the executor, and the sites when the catalog changed
+        env:
+          MK4_API_SERVER: ${{ vars.MK4_API_SERVER }}
+          MK4_CA_DATA: ${{ vars.MK4_CA_DATA }}
+          MK4_CI_TOKEN: ${{ secrets.MK4_CI_TOKEN }}
+        run: |
+          set -euo pipefail
+          source scripts/lib/ci-kubeconfig.sh
+          # --previous: nothing to rename; the executor image kept its name when it left moks-cms (2026-11-16).
+          python3 scripts/ci-rollout.py "$REGISTRY/practice-executor" "$TAG"
+          echo "- practice-executor → \`$TAG\`" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$CATALOG" == true ]]; then
+            # Every Deployment with an init container from practice-catalog is restarted (it is already on :latest).
+            # Exit 2: no site loads the catalog image yet (its manifests still bundle the problems); not a failure here.
+            rc=0; python3 scripts/ci-rollout.py "$REGISTRY/practice-catalog" latest || rc=$?
+            case $rc in
+              0) echo "- sites restarted to load the new catalog" >> "$GITHUB_STEP_SUMMARY" ;;
+              2) echo "::notice::No Deployment loads practice-catalog yet: nothing restarted." ;;
+              *) exit "$rc" ;;
+            esac
+          fi
