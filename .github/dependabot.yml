@@ -1,0 +1,44 @@
+# Dependabot version updates for practice-programming. Pull requests run .github/workflows/ci.yml (check).
+version: 2
+
+updates:
+  # Practice executor: executor/pyproject.toml (exact pins, including the [test] extra). Its Dockerfiles are not
+  # covered: they use floating python:3.13-slim tags, so the only update would be a Python minor, which is
+  # bumped by hand together with the sandbox's PYTHON_VERSION build-arg in .github/workflows/ci.yml.
+  - package-ecosystem: pip
+    directory: /executor
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/New_York
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: "deps(executor)"
+    labels:
+      - dependencies
+      - python
+    groups:
+      executor-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # Actions in .github/workflows (pinned by commit SHA; Dependabot updates the SHA and the comment)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/New_York
+    commit-message:
+      prefix: "deps(ci)"
+    labels:
+      - dependencies
+      - github-actions
+    groups:
+      actions:
+        patterns:
+          - "*"

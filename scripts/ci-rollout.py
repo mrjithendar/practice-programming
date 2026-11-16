@@ -14,6 +14,8 @@ rollback by hand:
   and imagePullPolicy Always pulls it on restart;
 - `--previous <repository>` (repeatable) names a repository the image was renamed from: containers that still run it
   are moved to <repository>:<tag> as well. Without it, the first release after a rename would find no Deployment;
+- `--optional`: no Deployment runs <repository> is expected (e.g. no site loads the image yet): that case prints a
+  notice instead of an error. The exit code is still 2, so the caller decides;
 - each rollout is waited for (ROLLOUT_TIMEOUT, default 5m). One that does not finish fails the job; the others are
   still waited for.
 
@@ -70,10 +72,13 @@ def kubectl(*args: str, capture: bool = False) -> subprocess.CompletedProcess[st
 
 
 def main(argv: list[str]) -> int:
-    usage = f"usage: {argv[0]} <image repository without a tag> <tag> [--previous <repository>]..."
-    args, previous = argv[1:3], []
+    usage = f"usage: {argv[0]} <image repository without a tag> <tag> [--previous <repository>]... [--optional]"
+    args, previous, optional = argv[1:3], [], False
     rest = argv[3:]
     while rest:
+        if rest[0] == "--optional":
+            optional, rest = True, rest[1:]
+            continue
         if rest[0] != "--previous" or len(rest) < 2 or not rest[1] or repository(rest[1]) != rest[1]:
             print(usage, file=sys.stderr)
             return 2
@@ -92,7 +97,10 @@ def main(argv: list[str]) -> int:
         return 1
     to_set, current = plan(json.loads(listed.stdout).get("items", []), repo, tag, tuple(previous))
     if not to_set and not current:
-        print(f"::error::No Deployment runs {repo}. Apply kubernetes/ first; the release only moves workloads that exist.", file=sys.stderr)
+        if optional:
+            print(f"::notice::No Deployment runs {repo}: nothing to roll out.", file=sys.stderr)
+        else:
+            print(f"::error::No Deployment runs {repo}. Apply kubernetes/ first; the release only moves workloads that exist.", file=sys.stderr)
         return 2
 
     failed: list[str] = []

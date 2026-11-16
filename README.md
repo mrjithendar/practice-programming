@@ -47,8 +47,9 @@ assume Python.
 ## Setup (once)
 
 Secrets `HARBOR_USERNAME`, `HARBOR_PASSWORD`, `MK4_CI_TOKEN`, `MK4_CI_APPLY_TOKEN`; variables `MK4_API_SERVER`,
-`MK4_CA_DATA`, `PRACTICE_EXECUTOR_DEPLOY`. jithendar.com's `scripts/setup-ci-deployer.sh` and `setup-ci-applier.sh`
-set the cluster ones (`GITHUB_REPO=moks-tech/practice-programming`). First-time cluster steps: `setup-practice-runner.sh`.
+`MK4_CA_DATA`, `PRACTICE_EXECUTOR_DEPLOY`. `scripts/setup-ci-deployer.sh`, then `scripts/setup-ci-applier.sh`, set
+the cluster ones (`KUBE_CONTEXT=mk4`). They reuse the ServiceAccounts `github-ci-deployer` and `github-ci-applier`
+that jithendar.com sets up (and rotates) with its own scripts of the same names: run those first. First-time cluster steps: `setup-practice-runner.sh`.
 
 ## License
 

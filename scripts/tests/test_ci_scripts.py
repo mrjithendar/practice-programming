@@ -115,6 +115,13 @@ class Rollout(unittest.TestCase):
         self.assertEqual(calls, ["get deployments -o json"])
         self.assertIn("No Deployment runs", output)
 
+    def test_optional_makes_nothing_to_release_a_notice_with_the_same_exit_code(self) -> None:
+        code, calls, output = self.run_script([deployment("seo-agent", {"seo-agent": "r.example/seo-agent:latest"})], SITE, "latest", "--optional")
+        self.assertEqual(code, 2)
+        self.assertEqual(calls, ["get deployments -o json"])
+        self.assertIn("::notice::No Deployment runs", output)
+        self.assertNotIn("::error::", output)
+
     def test_a_rollout_that_does_not_finish_fails_but_the_others_are_still_waited_for(self) -> None:
         live = [deployment("jithendar-com", {"jithendar-com": f"{SITE}:latest"}), deployment("jithendar-com-worker", {"worker": f"{SITE}:latest"})]
         code, calls, output = self.run_script(live, SITE, "pr-7", STUB_FAIL_STATUS="jithendar-com")

@@ -24,8 +24,8 @@ name: practice
 # execution off in a site's Admin → Python practice → Settings (instant).
 #
 # Secrets: HARBOR_USERNAME, HARBOR_PASSWORD (Harbor robot, project jithendar), MK4_CI_TOKEN and MK4_CI_APPLY_TOKEN;
-# variables MK4_API_SERVER, MK4_CA_DATA (set them with jithendar.com's scripts/setup-ci-deployer.sh and
-# setup-ci-applier.sh, GITHUB_REPO=moks-tech/practice-programming).
+# variables MK4_API_SERVER, MK4_CA_DATA, PRACTICE_EXECUTOR_DEPLOY (set them with scripts/setup-ci-deployer.sh, then
+# scripts/setup-ci-applier.sh; the ServiceAccounts themselves are set up from jithendar.com).
 
 on:
   workflow_dispatch:
@@ -71,7 +71,7 @@ jobs:
           bash scripts/tests/kube-context.test.sh
           scripts/check-conflict-copies.sh
       - name: shellcheck
-        run: shellcheck -x scripts/manifests.sh scripts/check-conflict-copies.sh scripts/create-practice-executor-secrets.sh scripts/lib/kube-context.sh scripts/lib/ci-kubeconfig.sh scripts/tests/kube-context.test.sh
+        run: shellcheck -x scripts/manifests.sh scripts/check-conflict-copies.sh scripts/create-practice-executor-secrets.sh scripts/lib/kube-context.sh scripts/lib/ci-kubeconfig.sh scripts/tests/kube-context.test.sh scripts/setup-ci-applier.sh scripts/setup-ci-deployer.sh
 
   images:
     needs: check
@@ -169,7 +169,7 @@ jobs:
         run: |
           set -euo pipefail
           for v in MK4_API_SERVER MK4_CA_DATA MK4_CI_APPLY_TOKEN; do
-            [[ -n "${!v}" ]] || { echo "::error::$v is not set; run jithendar.com's scripts/setup-ci-applier.sh with GITHUB_REPO=$GITHUB_REPOSITORY"; exit 1; }
+            [[ -n "${!v}" ]] || { echo "::error::$v is not set; run scripts/setup-ci-applier.sh"; exit 1; }
           done
           export KUBECONFIG="$RUNNER_TEMP/kubeconfig-apply"
           trap 'rm -f "$KUBECONFIG"' EXIT
@@ -195,10 +195,10 @@ jobs:
           if [[ "$CATALOG" == true ]]; then
             # Every Deployment with an init container from practice-catalog is restarted (it is already on :latest).
             # Exit 2: no site loads the catalog image yet (its manifests still bundle the problems); not a failure here.
-            rc=0; python3 scripts/ci-rollout.py "$REGISTRY/practice-catalog" latest || rc=$?
+            rc=0; python3 scripts/ci-rollout.py "$REGISTRY/practice-catalog" latest --optional || rc=$?
             case $rc in
               0) echo "- sites restarted to load the new catalog" >> "$GITHUB_STEP_SUMMARY" ;;
-              2) echo "::notice::No Deployment loads practice-catalog yet: nothing restarted." ;;
+              2) echo "- no site loads practice-catalog yet: nothing restarted" >> "$GITHUB_STEP_SUMMARY" ;;
               *) exit "$rc" ;;
             esac
           fi
