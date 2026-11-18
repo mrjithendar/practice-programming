@@ -1,8 +1,9 @@
 """
 Where a job runs.
 
-KubernetesBackend (production): one short-lived pod per job in the sandbox namespace, under the gVisor
-RuntimeClass whose runsc is configured with network=none. The pod has no service-account token, no volumes
+KubernetesBackend (production): one short-lived pod per job in the sandbox namespace, under the cluster's default
+runtime (its network cut off by NetworkPolicy practice-sandbox) or, when EXECUTOR_RUNTIME_CLASS=gvisor-nonet, under
+gVisor with network=none. The pod has no service-account token, no volumes
 except a small in-memory /tmp, a read-only root filesystem, no capabilities, a non-root user and a hard
 deadline. The dispatcher talks to the API server with its own service account, which may only create, read
 and delete pods (and read pod logs) in the sandbox namespace.
@@ -46,7 +47,6 @@ class Backend(Protocol):
 def pod_spec(name: str, job_id: str, image: str, payload: str, deadline: int, s: Settings) -> dict[str, Any]:
     """The sandbox pod. Kept as a pure function so tests can assert every hardening field."""
     spec: dict[str, Any] = {
-        "runtimeClassName": s.runtime_class,
         "serviceAccountName": s.sandbox_service_account,
         "automountServiceAccountToken": False,
         "enableServiceLinks": False,
@@ -57,7 +57,8 @@ def pod_spec(name: str, job_id: str, image: str, payload: str, deadline: int, s:
         "hostPID": False,
         "hostIPC": False,
         "shareProcessNamespace": False,
-        # No cluster DNS: the sandbox has no network (runsc network=none), and nothing should even look names up.
+        # No cluster DNS: the sandbox must not reach anything (NetworkPolicy practice-sandbox denies all traffic;
+        # under gVisor runsc network=none as well), and nothing should even look names up.
         "dnsPolicy": "None",
         "dnsConfig": {"nameservers": ["127.0.0.1"]},
         "securityContext": {
@@ -88,6 +89,8 @@ def pod_spec(name: str, job_id: str, image: str, payload: str, deadline: int, s:
         ],
         "volumes": [{"name": "tmp", "emptyDir": {"medium": "Memory", "sizeLimit": "16Mi"}}],
     }
+    if s.runtime_class:
+        spec["runtimeClassName"] = s.runtime_class
     if s.image_pull_secret:
         spec["imagePullSecrets"] = [{"name": s.image_pull_secret}]
     return {
@@ -97,7 +100,7 @@ def pod_spec(name: str, job_id: str, image: str, payload: str, deadline: int, s:
             "name": name,
             "namespace": s.sandbox_namespace,
             # No Istio sidecar: it would be an init container, which policy practice-sandbox-pods rejects, and the
-            # gVisor no-network runtime gives the pod nothing to proxy. (istiod's neverInjectSelector says so too.)
+            # sandbox may not talk to anything, so there is nothing to proxy. (istiod's neverInjectSelector says so too.)
             "labels": {
                 "app.kubernetes.io/name": "practice-sandbox",
                 "practice.jithendar.com/job": job_id,
@@ -186,7 +189,7 @@ class KubernetesBackend:
                 return phase
             now = loop.time()
             if run_deadline is None and now > start_deadline:
-                raise InfraError("sandbox did not start in time (is the gVisor RuntimeClass installed?)")
+                raise InfraError("sandbox did not start in time (image pull? quota? with gvisor-nonet: is gVisor installed on the node?)")
             if run_deadline is not None and now > run_deadline:
                 return "DeadlineExceeded"
             await asyncio.sleep(delay)

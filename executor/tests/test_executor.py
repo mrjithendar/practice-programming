@@ -115,7 +115,7 @@ def test_local_backend_is_refused_in_production():
 def test_sandbox_pod_is_hardened():
     pod = pod_spec("run-x", "job", "img", "payload", 60, settings(image_pull_secret="harbor-pull"))
     spec = pod["spec"]
-    assert spec["runtimeClassName"] == "gvisor-nonet"
+    assert "runtimeClassName" not in spec
     assert spec["automountServiceAccountToken"] is False
     assert spec["enableServiceLinks"] is False
     assert spec["hostNetwork"] is False and spec["hostPID"] is False and spec["hostIPC"] is False
@@ -153,7 +153,19 @@ def test_kubernetes_backend_runs_a_pod_and_deletes_it():
     result = asyncio.run(backend.execute("abcdef1234567890", 1, req(), wanted))
     assert result["status"] == "completed"
     assert calls[0][0] == "POST" and calls[-1][0] == "DELETE"
-    assert created["spec"]["runtimeClassName"] == "gvisor-nonet"
+    assert "runtimeClassName" not in created["spec"]
+
+
+def test_sandbox_pod_uses_gvisor_when_configured():
+    spec = pod_spec("run-x", "job", "img", "payload", 60, settings(runtime_class="gvisor-nonet"))["spec"]
+    assert spec["runtimeClassName"] == "gvisor-nonet"
+
+
+def test_only_the_default_runtime_or_gvisor_is_accepted():
+    config.validate(settings(env="production", backend="kubernetes", runtime_class=""))
+    config.validate(settings(env="production", backend="kubernetes", runtime_class="gvisor-nonet"))
+    with pytest.raises(RuntimeError):
+        config.validate(settings(env="production", backend="kubernetes", runtime_class="nvidia"))
 
 
 # --- queue and API -------------------------------------------------------------------------------------

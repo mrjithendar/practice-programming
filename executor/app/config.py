@@ -32,7 +32,10 @@ class Settings:
     # runtime id → sandbox image (e.g. {"python-3.13": "…/practice-sandbox:latest"}).
     runtimes: dict[str, str] = field(default_factory=dict)
     sandbox_namespace: str = "practice-sandbox"
-    runtime_class: str = "gvisor-nonet"
+    # Kubernetes RuntimeClass for sandbox pods. Empty (the default): the cluster's default runtime (runc), with the
+    # network cut off by NetworkPolicy practice-sandbox. "gvisor-nonet": gVisor with network=none, where installed
+    # (scripts/install-gvisor-mk4.sh). Admission policy practice-sandbox-pods allows only these two.
+    runtime_class: str = ""
     sandbox_service_account: str = "practice-sandbox"
     image_pull_secret: str = ""
     sandbox_cpu: str = "1"
@@ -78,7 +81,7 @@ def load() -> Settings:
         allow_insecure_local=os.environ.get("EXECUTOR_ALLOW_INSECURE_LOCAL") == "yes-i-understand",
         runtimes=runtimes,
         sandbox_namespace=os.environ.get("EXECUTOR_SANDBOX_NAMESPACE", "practice-sandbox"),
-        runtime_class=os.environ.get("EXECUTOR_RUNTIME_CLASS", "gvisor-nonet"),
+        runtime_class=os.environ.get("EXECUTOR_RUNTIME_CLASS", "").strip(),
         sandbox_service_account=os.environ.get("EXECUTOR_SANDBOX_SERVICE_ACCOUNT", "practice-sandbox"),
         image_pull_secret=os.environ.get("EXECUTOR_IMAGE_PULL_SECRET", ""),
         sandbox_cpu=os.environ.get("EXECUTOR_SANDBOX_CPU", "1"),
@@ -106,5 +109,8 @@ def validate(s: Settings) -> None:
         )
     if s.production and len(s.api_token) < 32:
         raise RuntimeError("EXECUTOR_API_TOKEN (32+ characters) is required in production.")
-    if s.production and not s.runtime_class:
-        raise RuntimeError("EXECUTOR_RUNTIME_CLASS is required in production (sandbox pods must not use the default runtime).")
+    if s.runtime_class not in ("", "gvisor-nonet"):
+        raise RuntimeError(
+            f"EXECUTOR_RUNTIME_CLASS must be empty (default runtime) or gvisor-nonet, not {s.runtime_class!r}: "
+            "admission policy practice-sandbox-pods rejects any other."
+        )
