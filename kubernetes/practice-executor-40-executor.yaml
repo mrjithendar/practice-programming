@@ -32,7 +32,7 @@ spec:
   # 0 until mk4 has the sandbox layer again (gVisor, practice-executor-05/-10/-15/-20 and verify-practice-sandbox.sh,
   # all applied by a person; CI never applies them). Without its ServiceAccount the pods cannot be created and the
   # deploy workflow fails waiting for them. Set back to 2 once scripts/verify-practice-sandbox.sh passes.
-  replicas: 0
+  replicas: 2
   selector: { matchLabels: { app: practice-executor-api } }
   template:
     metadata:
