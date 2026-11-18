@@ -11,7 +11,9 @@ data:
   EXECUTOR_ENV: production
   EXECUTOR_BACKEND: kubernetes
   EXECUTOR_SANDBOX_NAMESPACE: jithendar
-  EXECUTOR_RUNTIME_CLASS: gvisor-nonet
+  # Empty: sandbox pods use the cluster's default runtime, isolated by NetworkPolicy practice-sandbox (deny all) and
+  # admission policy practice-sandbox-pods. gvisor-nonet adds gVisor where it is installed (scripts/install-gvisor-mk4.sh).
+  EXECUTOR_RUNTIME_CLASS: ""
   EXECUTOR_SANDBOX_SERVICE_ACCOUNT: practice-sandbox
   EXECUTOR_IMAGE_PULL_SECRET: harbor-pull
   EXECUTOR_DISPATCHER_CONCURRENCY: "4"
@@ -29,9 +31,9 @@ metadata:
   namespace: jithendar
   labels: { app: practice-executor-api, app.kubernetes.io/part-of: python-practice }
 spec:
-  # 0 until mk4 has the sandbox layer again (gVisor, practice-executor-05/-10/-15/-20 and verify-practice-sandbox.sh,
-  # all applied by a person; CI never applies them). Without its ServiceAccount the pods cannot be created and the
-  # deploy workflow fails waiting for them. Set back to 2 once scripts/verify-practice-sandbox.sh passes.
+  # 0 until mk4 has the sandbox layer again (practice-executor-10/-15/-20 and the Secrets, applied by a person; CI never
+  # applies them). Without its ServiceAccount the pods cannot be created and the deploy workflow fails waiting for
+  # them. Set back to 2 once scripts/verify-practice-sandbox.sh passes. gVisor is optional (EXECUTOR_RUNTIME_CLASS).
   replicas: 2
   selector: { matchLabels: { app: practice-executor-api } }
   template:
@@ -71,9 +73,9 @@ metadata:
   namespace: jithendar
   labels: { app: practice-dispatcher, app.kubernetes.io/part-of: python-practice }
 spec:
-  # 0 until mk4 has the sandbox layer again (gVisor, practice-executor-05/-10/-15/-20 and verify-practice-sandbox.sh,
-  # all applied by a person; CI never applies them). Without its ServiceAccount the pods cannot be created and the
-  # deploy workflow fails waiting for them. Set back to 1 once scripts/verify-practice-sandbox.sh passes.
+  # 0 until mk4 has the sandbox layer again (practice-executor-10/-15/-20 and the Secrets, applied by a person; CI never
+  # applies them). Without its ServiceAccount the pods cannot be created and the deploy workflow fails waiting for
+  # them. Set back to 1 once scripts/verify-practice-sandbox.sh passes. gVisor is optional (EXECUTOR_RUNTIME_CLASS).
   replicas: 0
   selector: { matchLabels: { app: practice-dispatcher } }
   template:

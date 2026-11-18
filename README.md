@@ -8,12 +8,12 @@ moks-cms `services/executor`, the problems from jithendar.com `content/python-pr
 
 | Path | Contents |
 |---|---|
-| [`executor/`](executor/README.md) | FastAPI API + dispatcher (Redis queue, a fresh gVisor pod per job), tests, `Dockerfile` |
+| [`executor/`](executor/README.md) | FastAPI API + dispatcher (Redis queue, a fresh sandbox pod per job, gVisor optional), tests, `Dockerfile` |
 | `executor/sandbox/` | The Python sandbox image and `runner.py`, which runs inside it |
 | `executor/tools/build_problems.py` | Validates the problems (every reference solution runs through the real runner) and writes the catalog |
 | `problems/python/` | `roles.yaml`, `topics.yaml`, `problems/*.yaml` (written by people) and `catalog.generated.json` (generated, committed) |
 | `Dockerfile.catalog` | `practice-catalog`: the generated catalogs, one folder per language, copied into a site by an init container |
-| `kubernetes/` | `practice-executor-*.yaml`: RuntimeClass, RBAC, admission policies, quota, the API and dispatcher, NetworkPolicies (namespace `jithendar`) |
+| `kubernetes/` | `practice-executor-*.yaml`: RuntimeClass (optional gVisor), RBAC, admission policies, quota, the API and dispatcher, NetworkPolicies (namespace `jithendar`) |
 | `scripts/` | `manifests.sh`, rollout (`ci-rollout.py`, `keep-live-images.py`, `ci-app-manifests.py`), `install-gvisor-mk4.sh`, `verify-practice-sandbox.sh`, `create-practice-executor-secrets.sh` |
 | [`docs/`](docs/PYTHON_PRACTICE_EXECUTOR.md) | Threat model, architecture, turning it on, operating it |
 
