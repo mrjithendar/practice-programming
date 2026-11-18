@@ -76,7 +76,7 @@ spec:
   # 0 until mk4 has the sandbox layer again (practice-executor-10/-15/-20 and the Secrets, applied by a person; CI never
   # applies them). Without its ServiceAccount the pods cannot be created and the deploy workflow fails waiting for
   # them. Set back to 1 once scripts/verify-practice-sandbox.sh passes. gVisor is optional (EXECUTOR_RUNTIME_CLASS).
-  replicas: 0
+  replicas: 2
   selector: { matchLabels: { app: practice-dispatcher } }
   template:
     metadata:
