@@ -4,11 +4,11 @@ version = "1.0.0"
 description = "Sandboxed Python execution for jithendar.com Python practice (API + dispatcher)."
 requires-python = ">=3.11"
 dependencies = [
-  "fastapi==0.162.5",
+  "fastapi==0.165.0",
   "uvicorn==0.54.0",
   "redis==8.1.0",
   "httpx==0.28.1",
-  "pydantic==2.14.3",
+  "pydantic==2.14.4",
 ]
 
 [build-system]
